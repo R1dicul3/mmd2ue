@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 资产边界（C5）：仓库不包含 PMX/VMD/音频/借用贴图实体文件
+*.pmx
+*.vmd
+*.vpd
+*.pmm
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.tga
+*.bmp
+samples/private/
+
+# Local dev tooling / cache (sandbox workaround artifacts)
+.deps/
+.deps-install/
+tmp/
+pytest-cache-files-*/
+
+# Team coordination state (not part of the product; must not be pushed)
+.agent-teams/
+
+# Third-party reference material (input manual, see ADR-004: no asset
+# distribution — kept local, not version-controlled)
+MMD2UE_实践手册.md

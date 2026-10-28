@@ -1,0 +1,72 @@
+{
+  "ir_version": "0.1.0",
+  "format": "pmx",
+  "model_name": "synthetic",
+  "pmx_version": 2.0,
+  "encoding": "utf-16le",
+  "bones": [
+    {
+      "name": "center",
+      "name_en": "center",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_index": 0,
+      "flag": 14
+    },
+    {
+      "name": "arm",
+      "name_en": "arm",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_index": 0,
+      "flag": 14
+    }
+  ],
+  "morphs": [
+    {
+      "name": "smile",
+      "type": 1,
+      "offsets": [
+        {
+          "vertex_index": 0,
+          "offset": [
+            0.0,
+            0.1,
+            0.0
+          ]
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "mat1",
+      "diffuse": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "ambient": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "face_count": 3,
+      "toon_flag": 0
+    }
+  ],
+  "counts_materials": 1,
+  "counts_bones": 2,
+  "counts_morphs": 1,
+  "counts_vertices": 1,
+  "counts_surfaces": 1,
+  "counts_rigid_bodies": 0,
+  "counts_joints": 0
+}

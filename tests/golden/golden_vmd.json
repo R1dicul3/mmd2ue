@@ -1,0 +1,67 @@
+{
+  "ir_version": "0.1.0",
+  "format": "vmd",
+  "model_name": "synthetic",
+  "bones": [
+    {
+      "name": "center",
+      "frame": 0,
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "name": "arm",
+      "frame": 30,
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "frame": 0,
+      "distance": 10.0,
+      "fov": 30,
+      "perspective": true,
+      "position": [
+        0.0,
+        5.0,
+        -10.0
+      ]
+    },
+    {
+      "frame": 30,
+      "distance": 10.0,
+      "fov": 30,
+      "perspective": true,
+      "position": [
+        0.0,
+        5.0,
+        -10.0
+      ]
+    }
+  ],
+  "bone_frames": 2,
+  "morph_frames": 1,
+  "camera_frames": 2,
+  "light_frames": 0,
+  "self_shadow_frames": 0,
+  "ik_frames": 0
+}
