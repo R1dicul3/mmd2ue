@@ -12,6 +12,7 @@ import os
 import sys
 
 from mmd2ue.core.ir import IR_VERSION
+from mmd2ue.core.export import gltf
 from mmd2ue.core.parsers import pmx, vmd
 
 
@@ -97,6 +98,28 @@ def cmd_convert_camera(args) -> int:
     return 0
 
 
+def cmd_export_gltf(args) -> int:
+    """Export a PMX model to glTF 2.0 (.gltf + .bin) + a JSON report.
+
+    The report records approximated/ignored material items (sphere map /
+    toon / edge) per docs/stage2-requirements.md section 3 (M2).
+    """
+    model = pmx.parse_file(args.path)
+    export_report = gltf.export_gltf_files(model, args.output, args.bin)
+    report_path = args.report
+    if report_path:
+        _write_json(export_report.to_dict(), report_path)
+    print("wrote %s + %s (%d bones, %d verts, %d materials)" % (
+        args.output, args.bin,
+        model.counts.get("bones", 0), model.counts.get("vertices", 0),
+        model.counts.get("materials", 0)))
+    ignored = export_report.ignored_materials
+    if ignored:
+        print("ignored material items: %d material(s)" % len(ignored))
+        for mat_idx, (name, items) in sorted(ignored.items()):
+            print("  [%d] %s: %s" % (mat_idx, name, ", ".join(items)))
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mmd2ue", description="MMD -> UE5.8 converter")
     parser.add_argument("--version", action="version",
@@ -121,6 +144,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path")
     p.add_argument("-o", "--output", required=True)
     p.set_defaults(func=cmd_convert_camera)
+
+    p = sub.add_parser("export-gltf", help="convert PMX -> glTF 2.0 (.gltf + .bin)")
+    p.add_argument("path")
+    p.add_argument("-o", "--output", required=True, help="output .gltf path")
+    p.add_argument("--bin", required=True, help="output .bin path")
+    p.add_argument("--report", default=None, help="write JSON export report to this path")
+    p.set_defaults(func=cmd_export_gltf)
+
 
     return parser
 

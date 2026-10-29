@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-"""Five-step merge gate (docs/stage1-requirements.md §1.2).
+"""Eight-step merge gate (stage 1 §1.2 + stage 2 §4 glTF/asset extensions).
 
 Runs, in order (any failure blocks merge):
   1. Unit tests (tests/unit)
   2. Golden comparison (tests/golden)
   3. Conversion report check: report must contain units/skipped/approximated
   4. LICENSE file existence check
-  5. Asset leak check: no *.pmx / *.vmd / *.pmm / *.wav / *.mp3 / *.tga / *.bmp
+  5. Asset leak check: no forbidden entity assets in the repo
+  6. glTF export golden comparison (stage 2, D-M2-4 / AC-M2-4)
+  7. glTF export report check (stage 2, D-M2-5 / AC-M2-8)
+  8. Distribution tree check (git ls-files / sdist SOURCES.txt, ADR-006)
+     (5 continued) no *.pmx / *.vmd / *.pmm / *.wav / *.mp3 / *.tga / *.bmp
      entity assets anywhere in the repo (samples/ must only hold self-generated
      synthetic inputs)
 
-Exits 0 only when all five steps pass.
+Exits 0 only when all eight steps pass.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -35,13 +40,18 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
     [_p for _p in (_SRC, _DEPS, _env) if _p]
 )
 
-# Asset extensions that must never be committed (constraint C5).
-FORBIDDEN_EXTS = {".pmx", ".vmd", ".pmm", ".wav", ".mp3", ".flac", ".ogg",
-                   ".tga", ".bmp"}
+# Asset extensions that must never be committed (constraint C5 + ADR-006).
+# Model/motion/audio AND borrowed-image extensions (F5).
+FORBIDDEN_EXTS = {
+    ".pmx", ".vmd", ".vpd", ".pmm",                       # model / motion
+    ".wav", ".mp3", ".flac", ".ogg", ".aac",              # audio
+    ".tga", ".bmp", ".png", ".jpg", ".jpeg", ".dds",      # images
+    ".tif", ".tiff", ".psd", ".gif", ".webp", ".hdr", ".exr",
+}
 
 
 def step(n: int, title: str) -> None:
-    print("\n[%d/5] %s" % (n, title), flush=True)
+    print("\n[%d/8] %s" % (n, title), flush=True)
 
 
 def run(cmd: list[str]) -> int:
@@ -171,8 +181,162 @@ def _samples_match_generator(paths) -> bool:
     return ok
 
 
+def check_gltf_golden() -> bool:
+    """Step 6: core glTF exporter output matches the hand-authored golden.
+
+    Uses the synthetic PMX sample (build_pmx_gltf) and compares the exporter
+    output against tests/golden/gltf/golden_gltf.json with float rounding to
+    3 decimals (numeric tolerance per docs/stage2-requirements.md §4).
+    """
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import gen_samples
+        from mmd2ue.core.parsers import pmx
+        from mmd2ue.core.export import gltf
+    except Exception as e:  # noqa: BLE001
+        print("  ! failed to load exporter: %s" % e)
+        return False
+
+    ir = pmx.parse(gen_samples.build_pmx_gltf())
+    g, bin_data, _report = gltf.export_gltf(ir)
+
+    golden_path = os.path.join(ROOT, "tests", "golden", "gltf", "golden_gltf.json")
+    if not os.path.isfile(golden_path):
+        print("  ! golden glTF missing: %s" % golden_path)
+        return False
+    with open(golden_path, encoding="utf-8") as fh:
+        golden = json.load(fh)
+
+    if _round3(g) != _round3(golden):
+        print("  ! glTF golden mismatch — FAIL")
+        return False
+    if g["buffers"][0]["byteLength"] != len(bin_data):
+        print("  ! glTF buffer byteLength != .bin size — FAIL")
+        return False
+    print("  ok glTF golden matches (buffer=%d bytes)" % len(bin_data))
+    return True
+
+
+def check_gltf_report() -> bool:
+    """Step 7: glTF export report lists ignored items + canonical keys.
+
+    AC-M2-8: the report must list, per material, the ignored/approximated
+    material features (sphere map / toon / edge) as required by
+    docs/stage2-requirements.md §3; and must carry the canonical
+    units/skipped/approximated keys (parser convention, F3).
+    """
+    try:
+        import gen_samples
+        from mmd2ue.core.parsers import pmx
+        from mmd2ue.core.export import gltf
+    except Exception as e:  # noqa: BLE001
+        print("  ! failed to load exporter: %s" % e)
+        return False
+
+    ir = pmx.parse(gen_samples.build_pmx_gltf())
+    _g, _bin_data, report = gltf.export_gltf(ir)
+    d = report.to_dict()
+
+    ok = True
+    # Canonical keys (F3).
+    missing_keys = [k for k in ("units", "skipped", "approximated") if k not in d]
+    if missing_keys:
+        print("  ! glTF report missing keys: %s — FAIL" % (missing_keys,))
+        ok = False
+    else:
+        print("  ok glTF report keys: units=%s skipped=%s approximated=%s"
+              % (d["units"], d["skipped"], d["approximated"]))
+
+    # Ignored material items (sphere_map/toon/edge).
+    ignored = d.get("ignored_materials", [])
+    if not ignored:
+        print("  ! report lists no ignored materials — FAIL")
+        return False
+    items = ignored[0]["items"]
+    missing_items = [k for k in ("sphere_map", "toon", "edge") if k not in items]
+    if missing_items:
+        print("  ! glTF report missing ignored items: %s — FAIL" % (missing_items,))
+        ok = False
+    else:
+        print("  ok glTF report lists ignored items: %s" % (", ".join(items)))
+
+    # External texture references (F7).
+    refs = d.get("texture_refs", [])
+    if not refs:
+        print("  ! glTF report lists no texture_refs — FAIL")
+        ok = False
+    else:
+        print("  ok glTF report lists texture_refs: %d reference(s)" % len(refs))
+
+    return ok
+
+
+def _round3(x):
+    if isinstance(x, float):
+        return round(x, 3)
+    if isinstance(x, list):
+        return [_round3(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _round3(v) for k, v in x.items()}
+    return x
+
+
+
+def check_distribution_tree() -> bool:
+    """Step 8: distribution tree carries no entity assets (ADR-006, F5).
+
+    Uses git ls-files (tracked files) when available, else falls back to the
+    sdist SOURCES.txt manifest. Either way it asserts the shipped tree has no
+    forbidden-extension asset, so "仓库与产物 tree 无实体资产" holds even
+    against a gitignored local cache directory.
+    """
+    tracked = _git_ls_files()
+    if tracked is not None:
+        offenders = [f for f in tracked
+                     if os.path.splitext(f)[1].lower() in FORBIDDEN_EXTS]
+        if offenders:
+            for o in offenders:
+                print("  ! tracked asset file: %s" % o)
+            print("  ! distribution tree has forbidden assets — FAIL")
+            return False
+        print("  ok git ls-files: %d tracked files, 0 forbidden assets" % len(tracked))
+        return True
+
+    # Fallback: sdist SOURCES.txt manifest.
+    sources = os.path.join(ROOT, "src", "mmd2ue.egg-info", "SOURCES.txt")
+    if not os.path.isfile(sources):
+        print("  ! no git and no SOURCES.txt — cannot verify distribution tree")
+        return False
+    offenders = []
+    with open(sources, encoding="utf-8") as fh:
+        for line in fh:
+            name = line.strip()
+            if name and os.path.splitext(name)[1].lower() in FORBIDDEN_EXTS:
+                offenders.append(name)
+    if offenders:
+        for o in offenders:
+            print("  ! SOURCES.txt asset file: %s" % o)
+        print("  ! distribution tree has forbidden assets — FAIL")
+        return False
+    print("  ok SOURCES.txt: 0 forbidden assets")
+    return True
+
+
+def _git_ls_files():
+    """Return the list of git-tracked file paths, or None when git is absent."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files"], cwd=ROOT,
+            capture_output=True, text=True, check=True,
+        )
+    except Exception:  # noqa: BLE001 - git may be unavailable
+        return None
+    return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+
+
+
 def main() -> int:
-    print("verify_all: five-step gate (root=%s)" % ROOT, flush=True)
+    print("verify_all: eight-step gate (root=%s)" % ROOT, flush=True)
 
     step(1, "unit tests")
     if run([sys.executable, "-m", "pytest", "tests/unit", "-q"]) != 0:
@@ -199,7 +363,22 @@ def main() -> int:
         print("FAIL: step 5 (asset leak)")
         return 1
 
-    print("\nALL FIVE STEPS PASSED")
+    step(6, "glTF export golden comparison")
+    if not check_gltf_golden():
+        print("FAIL: step 6 (glTF golden)")
+        return 1
+
+    step(7, "glTF export report check")
+    if not check_gltf_report():
+        print("FAIL: step 7 (glTF report)")
+        return 1
+
+    step(8, "distribution tree asset check")
+    if not check_distribution_tree():
+        print("FAIL: step 8 (distribution tree)")
+        return 1
+
+    print("\nALL EIGHT STEPS PASSED")
     return 0
 
 

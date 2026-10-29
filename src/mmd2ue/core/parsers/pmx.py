@@ -23,7 +23,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import BinaryIO
 
-from mmd2ue.core.ir import ModelIR, IR_VERSION
+from mmd2ue.core.ir import ModelIR, Vertex, IR_VERSION
 
 PMX_SIGNATURE = b"PMX "
 
@@ -127,35 +127,43 @@ class _Reader:
             raise ParserError("failed to decode string: %s" % e)
 
 
-def _parse_vertex(r: _Reader, h: _Header, acc: dict) -> None:
-    """Parse one PMX vertex, advancing r past its full payload.
+def _parse_vertex(r: _Reader, h: _Header, acc: dict) -> Vertex:
+    """Parse one PMX vertex into a materialized Vertex (position/normal/uv/skin).
 
     ``acc`` is a mutable dict that accumulates report counters: ``approximated``
     for SDEF vertices (treated as BDEF2) and ``skipped`` for unsupported weight
     types (QDEF, type 4) that are structurally skipped so a real 2.1 asset can
     be parsed degradingly instead of the whole file failing.
+
+    Skinning weights are normalized so the exporter can emit them directly as
+    JOINTS_0/WEIGHTS_0: BDEF1 gets a single joint at weight 1.0; BDEF2/4 and
+    SDEF (as BDEF2) retain up to 4 (joint, weight) pairs.
     """
-    r.vec3()                      # position
-    r.vec3()                      # normal
-    r.vec2()                      # uv
+    position = r.vec3()
+    normal = r.vec3()
+    uv = r.vec2()
     for _ in range(h.additional_uv):
         r.vec4()
     weight_type = r.u8()
+    joints = []
+    weights = []
     if weight_type == 0:          # BDEF1
-        r.uindex(h.bone_index_size)
+        joints = [r.uindex(h.bone_index_size)]
+        weights = [1.0]
     elif weight_type == 1:        # BDEF2
-        r.uindex(h.bone_index_size)
-        r.uindex(h.bone_index_size)
-        r.f32()
+        joints = [r.uindex(h.bone_index_size), r.uindex(h.bone_index_size)]
+        w = r.f32()
+        weights = [w, 1.0 - w]
     elif weight_type == 2:        # BDEF4
-        for _ in range(4):
-            r.uindex(h.bone_index_size)
-        for _ in range(4):
-            r.f32()
+        joints = [r.uindex(h.bone_index_size) for _ in range(4)]
+        weights = [r.f32() for _ in range(4)]
+        total = sum(weights)
+        if total > 0.0:
+            weights = [weight / total for weight in weights]
     elif weight_type == 3:        # SDEF: approximated as BDEF2 (drop C/R0/R1)
-        for _ in range(2):
-            r.uindex(h.bone_index_size)
-        r.f32()
+        joints = [r.uindex(h.bone_index_size), r.uindex(h.bone_index_size)]
+        w = r.f32()
+        weights = [w, 1.0 - w]
         r.vec3()                  # C
         r.vec3()                  # R0
         r.vec3()                  # R1
@@ -168,7 +176,12 @@ def _parse_vertex(r: _Reader, h: _Header, acc: dict) -> None:
         acc["skipped"] += 1
     else:
         raise ParserError("unknown vertex weight type %d" % weight_type)
-    r.f32()                       # edge scale
+    edge_scale = r.f32()
+    return Vertex(
+        position=position, normal=normal, uv=uv,
+        joints=joints, weights=weights,
+        weight_type=weight_type, edge_scale=edge_scale,
+    )
 
 
 def _parse_material(r: _Reader) -> tuple:
@@ -207,6 +220,9 @@ _IK_CONSTRAINT = ("rotation", "position_x", "position_y", "position_z")
 def _parse_bone(r: _Reader, h: _Header) -> dict:
     name = r.text()
     name_en = r.text()
+    # PMX 2.0 bone.position is the LOCAL translation relative to its parent
+    # (felixjones spec); passed through verbatim. The exporter accumulates it
+    # along the parent chain to recover the model-space absolute rest transform.
     position = r.vec3()
     parent_index = r.uindex(h.bone_index_size)
     layer = r.i32()
@@ -325,23 +341,24 @@ def parse(data: bytes) -> ModelIR:
     ir.comment = r.text()
     ir.comment_en = r.text()
 
-    # Vertices.
+    # Vertices (materialized for the glTF exporter).
     vertex_count = r.i32()
     acc = {"approximated": 0, "skipped": 0}
-    for _ in range(vertex_count):
-        _parse_vertex(r, h, acc)
+    vertices = [_parse_vertex(r, h, acc) for _ in range(vertex_count)]
     ir.counts["vertices"] = vertex_count
+    ir.vertices = vertices
 
-    # Faces (indices).
+    # Faces (indices): u16 triangle vertex indices (PMX spec).
     face_index_count = r.i32()
-    r.skip(face_index_count * 2)  # faces are u16 indices (PMX spec)
+    faces = [r.u16() for _ in range(face_index_count)]
     ir.counts["surfaces"] = face_index_count // 3
+    ir.faces = faces
 
-    # Textures.
+    # Textures (relative paths, materialized for material mapping).
     texture_count = r.i32()
-    for _ in range(texture_count):
-        r.text()
+    textures = [r.text() for _ in range(texture_count)]
     ir.counts["textures"] = texture_count
+    ir.textures = textures
 
     # Materials.
     material_count = r.i32()
@@ -427,10 +444,11 @@ def parse(data: bytes) -> ModelIR:
         r.vec3()                  # spring rotation
     ir.counts["joints"] = joint_count
 
-    # units semantics (see core/ir.py module docstring): for a PMX model, units
-    # is the number of materialized vertices (the primary conversion unit).
+    # units semantics (see core/ir.py module docstring): a PMX file is exactly
+    # one model, so the parse report counts units = 1 (models parsed). Vertex /
+    # material / bone counts are reported under ir.counts, not under units.
     ir.report = {
-        "units": vertex_count,
+        "units": 1,
         "skipped": acc["skipped"],
         "approximated": acc["approximated"],
     }

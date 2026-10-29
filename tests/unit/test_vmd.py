@@ -58,6 +58,13 @@ def test_ik_frame_parsed():
     assert ir.ik_frames[0]["ik"][0]["enabled"] is True
 
 
+def test_report_units_segment_count():
+    """F9: VMD report units = bone + morph + camera frame count (segments)."""
+    ir = vmd.parse(sample_bytes("motion.vmd"))
+    # 2 bone frames + 1 morph frame + 2 camera frames = 5 segments.
+    assert ir.report["units"] == 5
+
+
 def test_no_unreal_import():
     import inspect
     assert "import unreal" not in inspect.getsource(vmd)

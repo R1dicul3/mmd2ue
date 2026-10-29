@@ -22,6 +22,10 @@ def sample_bytes(name: str) -> bytes:
         return _gs.build_pmx_v2(2.0, "utf-16le")
     if name == "pmx21_utf8.pmx":
         return _gs.build_pmx_v2(2.1, "utf-8")
+    if name == "pmx_gltf.pmx":
+        return _gs.build_pmx_gltf()
+    if name == "pmx_gltf_chain.pmx":
+        return _gs.build_pmx_gltf_chain()
     if name == "motion.vmd":
         return _gs.build_vmd()
     if name == "pmx_sdef.pmx":

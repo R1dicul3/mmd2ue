@@ -106,6 +106,178 @@ def build_pmx_v2(version: float, encoding: str) -> bytes:
     return bytes(out)
 
 
+def build_pmx_gltf(version: float = 2.0, encoding: str = "utf-16le") -> bytes:
+    """Synthetic PMX exercising the M2 glTF path:
+
+    - 2 bones with a real parent/child hierarchy (root -> child)
+    - 3 vertices, one triangle, all BDEF2 (root/child equal weights)
+    - 1 texture + 1 material with diffuse + texture + sphere map + toon + edge
+
+    Used by the glTF golden test (tests/golden/test_gltf_golden.py) and the
+    verify_all glTF report check. Programmatically generated (no real assets).
+    """
+    enc_flag = 0 if encoding == "utf-16le" else 1
+    out = bytearray()
+    out += b"PMX " + struct.pack("<f", version)
+    out += struct.pack("<B", 8)
+    out += struct.pack("<B", enc_flag)
+    out += struct.pack("<B", 0)
+    for _ in range(6):
+        out += struct.pack("<B", 1)   # index sizes (bone idx, etc.)
+    # metadata
+    out += _pack_str("gltf-synthetic", encoding)
+    out += _pack_str("gltf-synthetic-en", encoding)
+    out += _pack_str("gltf synthetic", encoding)
+    out += _pack_str("gltf synthetic", encoding)
+    # vertices: 3 (a single triangle), BDEF2 root/child 50/50
+    out += struct.pack("<i", 3)
+    verts = [
+        ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0)),
+        ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0)),
+        ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0)),
+    ]
+    for pos, nrm, uv in verts:
+        out += struct.pack("<3f", *pos)
+        out += struct.pack("<3f", *nrm)
+        out += struct.pack("<2f", *uv)
+        out += struct.pack("<B", 1)   # BDEF2
+        out += struct.pack("<B", 0)   # bone 0 (root)
+        out += struct.pack("<B", 1)   # bone 1 (child)
+        out += struct.pack("<f", 0.5)  # weight
+        out += struct.pack("<f", 1.0)  # edge scale
+    # faces: 1 triangle (0, 1, 2)
+    out += struct.pack("<i", 3)
+    out += struct.pack("<3H", 0, 1, 2)
+    # textures: 1
+    out += struct.pack("<i", 1)
+    out += _pack_str("diffuse.png", encoding)
+    # materials: 1 (texture + sphere + toon + edge)
+    out += struct.pack("<i", 1)
+    out += _pack_str("skin", encoding)
+    out += _pack_str("skin", encoding)
+    out += struct.pack("<4f", 0.8, 0.6, 0.4, 1.0)   # diffuse
+    out += struct.pack("<3f", 0.1, 0.1, 0.1)        # specular
+    out += struct.pack("<f", 10.0)                   # specular strength
+    out += struct.pack("<3f", 0.0, 0.0, 0.0)        # ambient
+    out += struct.pack("<B", 0x09)                  # flag (edge enabled 0x08 | draw 0x01)
+    out += struct.pack("<4f", 0.0, 0.0, 0.0, 1.0)   # edge color
+    out += struct.pack("<f", 0.5)                    # edge size
+    out += struct.pack("<i", 0)                      # texture_index = 0
+    out += struct.pack("<i", 0)                      # sphere_texture_index = 0
+    out += struct.pack("<B", 1)                      # sphere_mode = 1 (multiply)
+    out += struct.pack("<B", 1)                      # toon_flag = 1 (toon file)
+    out += _pack_str("toon00.bmp", encoding)         # toon texture file name
+    out += _pack_str("", encoding)                   # memo
+    out += struct.pack("<i", 3)                      # face_count = 1 tri
+    # bones: 2 (root -> child hierarchy)
+    out += struct.pack("<i", 2)
+    # bone 0: root (parent_index = 0, self/root)
+    out += _pack_str("root", encoding)
+    out += _pack_str("root", encoding)
+    out += struct.pack("<3f", 0.0, 0.0, 0.0)
+    out += struct.pack("<B", 0)       # parent = 0 (root)
+    out += struct.pack("<i", 0)        # layer
+    out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)
+    # bone 1: child (parent_index = 0)
+    out += _pack_str("child", encoding)
+    out += _pack_str("child", encoding)
+    out += struct.pack("<3f", 0.0, 1.0, 0.0)
+    out += struct.pack("<B", 0)       # parent = 0
+    out += struct.pack("<i", 0)        # layer
+    out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)
+    # morphs: 0
+    out += struct.pack("<i", 0)
+    # display frames: 0
+    out += struct.pack("<i", 0)
+    # rigid bodies: 0
+    out += struct.pack("<i", 0)
+    # joints: 0
+    out += struct.pack("<i", 0)
+    return bytes(out)
+
+def build_pmx_gltf_chain(version: float = 2.0, encoding: str = "utf-16le") -> bytes:
+    """Synthetic PMX with a 3-bone chain whose parent bones are NOT at origin.
+
+    Exercises the F8 coordinate semantics: PMX bone.position is the LOCAL
+    (parent-relative) translation, so hips=(0,8,0) -> spine=(0,1,0) ->
+    head=(0,11,0) are the stored offsets. The glTF exporter writes them verbatim
+    as node translations and accumulates the absolute rest transform for
+    inverseBindMatrices, so the world bone positions reconstruct
+    hips=(0,8,0) -> spine=(0,9,0) -> head=(0,20,0) and the bind pose restores
+    the vertex. Also carries a minimal material (name + diffuse only) so the
+    exporter defensive .get() fallbacks (F10) are exercised.
+    """
+    enc_flag = 0 if encoding == "utf-16le" else 1
+    out = bytearray()
+    out += b"PMX " + struct.pack("<f", version)
+    out += struct.pack("<B", 8)
+    out += struct.pack("<B", enc_flag)
+    out += struct.pack("<B", 0)
+    for _ in range(6):
+        out += struct.pack("<B", 1)   # index sizes
+    # metadata
+    out += _pack_str("chain-synthetic", encoding)
+    out += _pack_str("chain-synthetic-en", encoding)
+    out += _pack_str("chain", encoding)
+    out += _pack_str("chain", encoding)
+    # vertices: 1, BDEF1 to head (bone 2), position at head absolute (0,20,0)
+    out += struct.pack("<i", 1)
+    out += struct.pack("<3f", 0.0, 20.0, 0.0)   # position
+    out += struct.pack("<3f", 0.0, 0.0, 1.0)    # normal
+    out += struct.pack("<2f", 0.0, 0.0)         # uv
+    out += struct.pack("<B", 0)                 # BDEF1
+    out += struct.pack("<B", 2)                 # bone 2 (head)
+    out += struct.pack("<f", 1.0)               # edge scale
+    # faces: 1 degenerate triangle
+    out += struct.pack("<i", 3)
+    out += struct.pack("<3H", 0, 0, 0)
+    # textures: 0
+    out += struct.pack("<i", 0)
+    # materials: 1 (minimal: name + diffuse only)
+    out += struct.pack("<i", 1)
+    out += _pack_str("skin", encoding)
+    out += _pack_str("skin", encoding)
+    out += struct.pack("<4f", 0.5, 0.5, 0.5, 1.0)   # diffuse
+    out += struct.pack("<3f", 0.0, 0.0, 0.0)        # specular
+    out += struct.pack("<f", 0.0)                    # specular strength
+    out += struct.pack("<3f", 0.0, 0.0, 0.0)        # ambient
+    out += struct.pack("<B", 0)                     # flag
+    out += struct.pack("<4f", 0.0, 0.0, 0.0, 1.0)   # edge color
+    out += struct.pack("<f", 1.0)                    # edge size
+    out += struct.pack("<i", -1)                     # texture_index
+    out += struct.pack("<i", -1)                     # sphere_texture_index
+    out += struct.pack("<B", 0)                      # sphere_mode
+    out += struct.pack("<B", 0)                      # toon_flag (shared)
+    out += struct.pack("<B", 0)                      # shared toon index
+    out += _pack_str("", encoding)                   # memo
+    out += struct.pack("<i", 1)                      # face_count
+    # bones: 3 (hips -> spine -> head), parent-relative LOCAL positions
+    # (PMX spec: bone.position is the local translation relative to its
+    # parent, so spine = +1 above hips, head = +11 above spine).
+    out += struct.pack("<i", 3)
+    bone_defs = [
+        ("hips", (0.0, 8.0, 0.0), 0),
+        ("spine", (0.0, 1.0, 0.0), 0),
+        ("head", (0.0, 11.0, 0.0), 1),
+    ]
+    for bname, pos, parent in bone_defs:
+        out += _pack_str(bname, encoding)
+        out += _pack_str(bname, encoding)
+        out += struct.pack("<3f", *pos)
+        out += struct.pack("<B", parent)      # parent index (u8)
+        out += struct.pack("<i", 0)           # layer
+        out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)
+    # morphs: 0
+    out += struct.pack("<i", 0)
+    # display frames: 0
+    out += struct.pack("<i", 0)
+    # rigid bodies: 0
+    out += struct.pack("<i", 0)
+    # joints: 0
+    out += struct.pack("<i", 0)
+    return bytes(out)
+
+
 def build_vmd() -> bytes:
     out = bytearray()
     out += b"Vocaloid Motion Data 0002" + b"\x00" * 5

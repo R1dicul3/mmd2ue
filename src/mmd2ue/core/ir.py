@@ -3,55 +3,46 @@
 The IR is the single source of truth shared between the core parsers and the
 future UE adaptation layer (adapters/ue5_8/). Every produced artifact carries
 an ir_version; loading refuses a mismatched version (no implicit compatibility).
+
+Report ``units`` semantics (per report producer; the three reports intentionally
+use different units — aggregate within one producer only, or convert using the
+definition below, see docs/stage2-requirements.md §8):
+  - PMX parse:        ``units = 1`` — one model per file (vertex/material/bone
+    counts are under ``ir.counts``, not under ``units``).
+  - VMD parse:        ``units = bone + morph + camera frame count`` — motion
+    segments parsed.
+  - glTF export:      ``units = vertex count`` — vertices written to the mesh.
+
+Bone ``position`` semantics: PMX 2.0 defines bone.position as the LOCAL
+(parent-relative) translation (felixjones spec: "Position | vec3 | The local
+translation of the bone"), so the parser passes it through unchanged; the
+absolute (model-space) rest transform is the parent-chain accumulation
+(parent_absolute + position). Vertex ``position`` is model-space absolute.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Optional
 
 IR_VERSION = "0.1.0"
 
 
 @dataclass
-class Bone:
-    name: str
-    name_en: str = ""
+class Vertex:
+    """A single mesh vertex with skinned joints/weights (BDEF1/2/4; SDEF->BDEF2).
+
+    ``joints`` / ``weights`` are parallel lists of up to 4 bone indices and
+    their float weights. BDEF1 has one entry (joint 0, weight 1.0). SDEF
+    (weight type 3) is approximated as BDEF2 from its first two bones +
+    weight, matching the parser's existing approximation policy.
+    """
     position: tuple = (0.0, 0.0, 0.0)
-    parent_index: int = -1
-    layer: int = 0
-    flag: int = 0
-    position_offset: tuple = (0.0, 0.0, 0.0)
-    ik: Optional[dict] = None
-
-
-@dataclass
-class Morph:
-    name: str
-    name_en: str = ""
-    panel: int = 0
-    type: int = 0
-    offsets: list = field(default_factory=list)
-
-
-@dataclass
-class Material:
-    name: str
-    name_en: str = ""
-    diffuse: tuple = (1.0, 1.0, 1.0, 1.0)
-    specular: tuple = (0.0, 0.0, 0.0)
-    specular_strength: float = 0.0
-    ambient: tuple = (0.0, 0.0, 0.0)
-    flag: int = 0
-    edge_color: tuple = (0.0, 0.0, 0.0, 1.0)
-    edge_size: float = 1.0
-    texture_index: int = 0
-    sphere_texture_index: int = -1
-    sphere_mode: int = 0
-    toon_flag: int = 0
-    toon_texture_index: int = -1
-    memo: str = ""
-    face_count: int = 0
+    normal: tuple = (0.0, 0.0, 1.0)
+    uv: tuple = (0.0, 0.0)
+    joints: list = field(default_factory=list)
+    weights: list = field(default_factory=list)
+    weight_type: int = 0
+    edge_scale: float = 1.0
 
 
 @dataclass
@@ -67,6 +58,9 @@ class ModelIR:
     index_sizes: dict = field(default_factory=dict)
     additional_uv: int = 0
     counts: dict = field(default_factory=dict)
+    vertices: list = field(default_factory=list)
+    faces: list = field(default_factory=list)
+    textures: list = field(default_factory=list)
     bones: list = field(default_factory=list)
     morphs: list = field(default_factory=list)
     materials: list = field(default_factory=list)

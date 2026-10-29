@@ -11,6 +11,7 @@
 - C3 核心与适配层分离：adapters/ue5_8/ 之外的代码不得 import unreal；IR 是唯一真相。验证：grep src/（排除 adapters/）无 import unreal。
 - C4 编码：PMX 字符串支持 UTF-16LE 或 UTF-8；VMD 名称为 Shift-JIS（CP932）；路径与文件名统一 UTF-8；写文件无 BOM。验证：单测覆盖两种 PMX 编码 + VMD Shift-JIS 解码 + 无 BOM 写入。
 - C5 资产边界：仓库/发布包**不得包含**任何 PMX/VMD/音频/借用贴图实体文件；.gitignore 含 *.pmx、*.vmd、*.pmm、*.wav、*.mp3 与 samples/private/。验证：门禁资产泄漏检查 + 仓库树核对。
+- C5b 工具定位（2026-10-29 用户决策，见 ADR-006）：**纯转换器，零资产分发**——工具本身不包含任何模型数据，只做转换；对外分发仅含工具自身代码；合成样例（tests 夹具）由 gen_samples.py 程序化生成，非借用模型数据。验证：仓库与分发包 tree 均无实体资产。
 - C6 复现性：同一输入两次运行产物哈希一致。验证：门禁可重复运行且结果稳定。
 
 ## 1. M0 —— 仓库 / ADR / 门禁脚手架

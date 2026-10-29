@@ -65,6 +65,12 @@ def test_qdef_vertex_counts_skipped():
     assert ir.report["approximated"] == 0
 
 
+def test_report_units_one_model():
+    """F9: PMX report units = 1 (one model per file), not vertex count."""
+    ir = pmx.parse(sample_bytes("pmx20_utf16le.pmx"))
+    assert ir.report["units"] == 1
+
+
 def test_no_unreal_import():
     import inspect
     assert "import unreal" not in inspect.getsource(pmx)
