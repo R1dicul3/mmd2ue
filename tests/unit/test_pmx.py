@@ -74,3 +74,41 @@ def test_report_units_one_model():
 def test_no_unreal_import():
     import inspect
     assert "import unreal" not in inspect.getsource(pmx)
+
+
+def test_bone_tail_position_vec3_and_indexed_tail():
+    """Tail position is always present: vec3 normally, bone index when bit 0 set.
+
+    Guards the tail-position regression: the parser must consume the tail
+    payload before the next bone so a real PMX does not desynchronise.
+    """
+    ir = pmx.parse(sample_bytes("pmx_bone_features.pmx"))
+    assert ir.counts["bones"] == 3
+    b0, b1, b2 = ir.bones
+    # Bone 0: normal tail -> vec3.
+    assert b0["tail_index"] is None
+    assert b0["tail_position"] == (0.0, 1.0, 0.0)
+    # Bone 1: indexed tail (bit 0) -> bone index 0, no vec3.
+    assert b1["tail_index"] == 0
+    assert b1["tail_position"] is None
+    # Bone 2: normal tail (vec3) even though it also has IK.
+    assert b2["tail_position"] == (0.0, 1.0, 0.0)
+    assert b2["tail_index"] is None
+
+
+def test_bone_ik_payload():
+    """IK (bit 5) is the last bone field and is parsed correctly."""
+    ir = pmx.parse(sample_bytes("pmx_bone_features.pmx"))
+    leg = ir.bones[2]
+    assert leg["ik"] is not None
+    assert leg["ik"]["target"] == 2
+    assert leg["ik"]["loop"] == 10
+    assert abs(leg["ik"]["limit_rad"] - 0.5) < 1e-6
+    assert len(leg["ik"]["links"]) == 1
+    link = leg["ik"]["links"][0]
+    assert link["target"] == 0
+    assert link["has_limit"] is False
+    assert link["limit_min"] is None
+    assert link["limit_max"] is None
+    # Bones without IK have ik=None.
+    assert ir.bones[0]["ik"] is None

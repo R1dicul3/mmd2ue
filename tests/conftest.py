@@ -36,4 +36,6 @@ def sample_bytes(name: str) -> bytes:
         return _gs.build_vmd_undecodable()
     if name == "vmd_ik.vmd":
         return _gs.build_vmd_ik()
+    if name == "pmx_bone_features.pmx":
+        return _gs.build_pmx_bone_features()
     raise KeyError(name)

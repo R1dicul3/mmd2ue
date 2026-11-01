@@ -114,8 +114,9 @@ def test_gltf_position_accessor_has_min_max():
     prim = g["meshes"][0]["primitives"][0]
     pos = g["accessors"][prim["attributes"]["POSITION"]]
     assert "min" in pos and "max" in pos
-    assert pos["min"] == [0.0, 0.0, 0.0]
-    assert pos["max"] == [1.0, 1.0, 0.0]
+    # Chirality: POSITION X is mirrored (PMX +X -> glTF -X).
+    assert pos["min"] == [-1.0, 0.0, 0.0]
+    assert pos["max"] == [0.0, 1.0, 0.0]
     nrm = g["accessors"][prim["attributes"]["NORMAL"]]
     assert "min" in nrm and "max" in nrm
     uv = g["accessors"][prim["attributes"]["TEXCOORD_0"]]
@@ -169,10 +170,13 @@ def test_gltf_bind_pose_restores_vertices():
     for bone in ir.bones:
         pos = bone.get("position", (0.0, 0.0, 0.0))
         ax = pos[0]; ay = pos[1] if len(pos) > 1 else 0.0; az = pos[2] if len(pos) > 2 else 0.0
-        world.append((ax, ay, az))
+        # Chirality: bone world X is mirrored in glTF.
+        world.append((-ax, ay, az))
 
-    # For each vertex, verify skinned position restores the IR position.
+    # For each vertex, verify skinned position restores the glTF vertex
+    # position (IR position with X mirrored).
     for v in ir.vertices:
+        gvx = -v.position[0]; gvy = v.position[1]; gvz = v.position[2]
         j = list(v.joints[:4]); w = list(v.weights[:4])
         while len(j) < 4:
             j.append(0); w.append(0.0)
@@ -188,12 +192,12 @@ def test_gltf_bind_pose_restores_vertices():
             # globalTransform(joint) * IBM == translation(world+ibm_t).
             # IBM == translation(-world), so world + ibm_t == 0.
             sx = wx + ibm_t[0]; sy = wy + ibm_t[1]; sz = wz + ibm_t[2]
-            rp[0] += weight * (v.position[0] + sx)
-            rp[1] += weight * (v.position[1] + sy)
-            rp[2] += weight * (v.position[2] + sz)
-        assert abs(rp[0] - v.position[0]) < 1e-6
-        assert abs(rp[1] - v.position[1]) < 1e-6
-        assert abs(rp[2] - v.position[2]) < 1e-6
+            rp[0] += weight * (gvx + sx)
+            rp[1] += weight * (gvy + sy)
+            rp[2] += weight * (gvz + sz)
+        assert abs(rp[0] - gvx) < 1e-6
+        assert abs(rp[1] - gvy) < 1e-6
+        assert abs(rp[2] - gvz) < 1e-6
 
 
 CHAIN_GOLDEN = os.path.join(HERE, "gltf", "golden_gltf_chain.json")
@@ -262,6 +266,7 @@ def test_gltf_chain_bind_pose_restores_vertex():
         "<" + str(ibm_acc["count"] * 16) + "f", bin_data, ibm_bv["byteOffset"])
 
     for v in ir.vertices:
+        gvx = -v.position[0]; gvy = v.position[1]; gvz = v.position[2]
         j = list(v.joints[:4]); w = list(v.weights[:4])
         while len(j) < 4:
             j.append(0); w.append(0.0)
@@ -274,9 +279,9 @@ def test_gltf_chain_bind_pose_restores_vertex():
             ibm_t = (m[12], m[13], m[14])
             wx, wy, wz = world[ji]
             sx = wx + ibm_t[0]; sy = wy + ibm_t[1]; sz = wz + ibm_t[2]
-            rp[0] += weight * (v.position[0] + sx)
-            rp[1] += weight * (v.position[1] + sy)
-            rp[2] += weight * (v.position[2] + sz)
-        assert abs(rp[0] - v.position[0]) < 1e-6
-        assert abs(rp[1] - v.position[1]) < 1e-6
-        assert abs(rp[2] - v.position[2]) < 1e-6
+            rp[0] += weight * (gvx + sx)
+            rp[1] += weight * (gvy + sy)
+            rp[2] += weight * (gvz + sz)
+        assert abs(rp[0] - gvx) < 1e-6
+        assert abs(rp[1] - gvy) < 1e-6
+        assert abs(rp[2] - gvz) < 1e-6

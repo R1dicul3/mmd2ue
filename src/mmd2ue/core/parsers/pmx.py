@@ -218,33 +218,64 @@ _IK_CONSTRAINT = ("rotation", "position_x", "position_y", "position_z")
 
 
 def _parse_bone(r: _Reader, h: _Header) -> dict:
+    # Field order per the PMX 2.0/2.1 spec (felixjones): name -> name_en ->
+    # position (LOCAL translation relative to parent) -> parent_index -> layer
+    # -> flags -> tail position -> [inherit bone] -> [fixed axis] ->
+    # [local co-ordinate] -> [external parent] -> [IK].
     name = r.text()
     name_en = r.text()
-    # PMX 2.0 bone.position is the LOCAL translation relative to its parent
-    # (felixjones spec); passed through verbatim. The exporter accumulates it
-    # along the parent chain to recover the model-space absolute rest transform.
     position = r.vec3()
     parent_index = r.uindex(h.bone_index_size)
     layer = r.i32()
     flag = r.u16()
-    # bit flags
-    target = True if flag & 0x0001 else False
-    rotatable = True if flag & 0x0002 else False
-    movable = True if flag & 0x0004 else False
-    visible = bool(flag & 0x0008)
-    operable = bool(flag & 0x0010)
-    ik = bool(flag & 0x0020)
-    inherit_local = bool(flag & 0x0080)
+
+    # Bit flags (felixjones spec). Bit 0 = indexed tail position; bit 5 = IK;
+    # bit 8/9 = inherit rotation/translation; bit 10 = fixed axis;
+    # bit 11 = local co-ordinate; bit 13 = external parent deform.
+    indexed_tail = bool(flag & 0x0001)
+    ik_flag = bool(flag & 0x0020)
     inherit_rotation = bool(flag & 0x0100)
     inherit_translation = bool(flag & 0x0200)
     fixed_axis = bool(flag & 0x0400)
-    local_axis = bool(flag & 0x0800)
-    deform_after_physics = bool(flag & 0x1000)
+    local_coord = bool(flag & 0x0800)
     external_parent = bool(flag & 0x2000)
 
-    if target:
-        r.uindex(h.bone_index_size)  # target bone
-    if ik:
+    # Tail position is ALWAYS present: a bone index when bit 0 is set,
+    # otherwise a vec3.
+    tail_index = None
+    tail_position = None
+    if indexed_tail:
+        tail_index = r.uindex(h.bone_index_size)
+    else:
+        tail_position = r.vec3()
+
+    # Inherit bone (bit 8 or bit 9): parent index + influence, read once.
+    inherit_parent = None
+    inherit_weight = None
+    if inherit_rotation or inherit_translation:
+        inherit_parent = r.uindex(h.bone_index_size)
+        inherit_weight = r.f32()
+
+    # Fixed axis (bit 10).
+    fixed_axis_vec = None
+    if fixed_axis:
+        fixed_axis_vec = r.vec3()
+
+    # Local co-ordinate (bit 11): X vector + Z vector.
+    local_x = None
+    local_z = None
+    if local_coord:
+        local_x = r.vec3()
+        local_z = r.vec3()
+
+    # External parent (bit 13).
+    external_parent_key = None
+    if external_parent:
+        external_parent_key = r.uindex(h.bone_index_size)
+
+    # IK (bit 5) is the LAST field in the bone payload.
+    bone_ik = None
+    if ik_flag:
         bone_ik = {
             "target": r.uindex(h.bone_index_size),
             "loop": r.i32(),
@@ -266,24 +297,15 @@ def _parse_bone(r: _Reader, h: _Header) -> dict:
                 "limit_min": limit_min,
                 "limit_max": limit_max,
             })
-    else:
-        bone_ik = None
-
-    if inherit_local:
-        r.uindex(h.bone_index_size)  # inherit parent
-        r.f32()                       # inherit weight
-    if fixed_axis:
-        r.vec3()
-    if local_axis:
-        r.vec3()
-    if external_parent:
-        r.i32()                       # external parent key
-    if deform_after_physics:
-        r.i32()                       # deform after physics key
 
     return {
         "name": name, "name_en": name_en, "position": position,
         "parent_index": parent_index, "layer": layer, "flag": flag,
+        "tail_index": tail_index, "tail_position": tail_position,
+        "inherit_parent": inherit_parent, "inherit_weight": inherit_weight,
+        "fixed_axis": fixed_axis_vec,
+        "local_x": local_x, "local_z": local_z,
+        "external_parent": external_parent_key,
         "ik": bone_ik,
     }
 

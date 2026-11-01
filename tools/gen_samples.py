@@ -87,7 +87,7 @@ def build_pmx_v2(version: float, encoding: str) -> bytes:
         out += bone_idx.pack(0)          # parent index (u8) — root uses self/0
         out += struct.pack("<i", 0)       # layer
         out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)  # visible|rotatable|movable
-        # no target/ik/etc flag => nothing after flag
+        out += struct.pack("<3f", 0, 1, 0)  # tail position (vec3, spec-required)
     # morphs: 1 (vertex)
     out += struct.pack("<i", 1)
     out += _pack_str("smile", encoding)
@@ -178,6 +178,7 @@ def build_pmx_gltf(version: float = 2.0, encoding: str = "utf-16le") -> bytes:
     out += struct.pack("<B", 0)       # parent = 0 (root)
     out += struct.pack("<i", 0)        # layer
     out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)
+    out += struct.pack("<3f", 0, 1, 0)  # tail position (vec3)
     # bone 1: child (parent_index = 0)
     out += _pack_str("child", encoding)
     out += _pack_str("child", encoding)
@@ -185,6 +186,7 @@ def build_pmx_gltf(version: float = 2.0, encoding: str = "utf-16le") -> bytes:
     out += struct.pack("<B", 0)       # parent = 0
     out += struct.pack("<i", 0)        # layer
     out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)
+    out += struct.pack("<3f", 0, 1, 0)  # tail position (vec3)
     # morphs: 0
     out += struct.pack("<i", 0)
     # display frames: 0
@@ -267,6 +269,7 @@ def build_pmx_gltf_chain(version: float = 2.0, encoding: str = "utf-16le") -> by
         out += struct.pack("<B", parent)      # parent index (u8)
         out += struct.pack("<i", 0)           # layer
         out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)
+        out += struct.pack("<3f", 0, 1, 0)  # tail position (vec3)
     # morphs: 0
     out += struct.pack("<i", 0)
     # display frames: 0
@@ -373,6 +376,7 @@ def build_pmx_sdef(version: float = 2.0, encoding: str = "utf-16le") -> bytes:
         out += bone_idx.pack(0)
         out += struct.pack("<i", 0)
         out += struct.pack("<H", 0x0008 | 0x0002 | 0x0004)
+        out += struct.pack("<3f", 0, 1, 0)  # tail position (vec3)
     # morphs: 0
     out += struct.pack("<i", 0)
     # display frames: 0
@@ -480,6 +484,69 @@ def build_vmd_ik() -> bytes:
     return bytes(out)
 
 
+def build_pmx_bone_features(version: float = 2.0, encoding: str = "utf-16le") -> bytes:
+    """Minimal PMX exercising the bone tail / indexed-tail / IK payload branches.
+
+    Three bones (no vertices/faces/materials so the bone walk is the focus):
+      0 "center"  normal bone, tail = vec3
+      1 "arm"     indexed tail (bit 0 set) -> tail = bone index 0
+      2 "leg"     IK (bit 5 set) -> one IK link (no angle limits)
+
+    This guards the tail-position regression: a spec-conformant PMX always
+    carries a tail position (vec3 or bone index) after the bone flags, which
+    the parser must consume before the next bone / IK payload.
+    """
+    enc_flag = 0 if encoding == "utf-16le" else 1
+    out = bytearray()
+    out += b"PMX " + struct.pack("<f", version)
+    out += struct.pack("<B", 8)
+    out += struct.pack("<B", enc_flag)
+    out += struct.pack("<B", 0)          # additional uv
+    for _ in range(6):
+        out += struct.pack("<B", 1)      # index sizes
+    out += _pack_str("synthetic", encoding)
+    out += _pack_str("synthetic-en", encoding)
+    out += _pack_str("synthetic comment", encoding)
+    out += _pack_str("synthetic comment", encoding)
+    out += struct.pack("<i", 0)          # vertices
+    out += struct.pack("<i", 0)          # faces
+    out += struct.pack("<i", 0)          # textures
+    out += struct.pack("<i", 0)          # materials
+    out += struct.pack("<i", 3)          # bones
+
+    def bone(name, pos, parent, flag, extra=b""):
+        nonlocal out
+        out += _pack_str(name, encoding)
+        out += _pack_str(name, encoding)
+        out += struct.pack("<3f", *pos)
+        out += struct.pack("<B", parent)
+        out += struct.pack("<i", 0)      # layer
+        out += struct.pack("<H", flag)
+        out += extra
+
+    # bone 0: normal, tail = vec3 (0,1,0)
+    bone("center", (0, 0, 0), 0, 0x0008 | 0x0002 | 0x0004,
+         struct.pack("<3f", 0, 1, 0))
+    # bone 1: indexed tail (bit 0) -> tail = bone index 0
+    bone("arm", (0, 1, 0), 0, 0x0008 | 0x0002 | 0x0004 | 0x0001,
+         struct.pack("<B", 0))
+    # bone 2: IK (bit 5), one link without angle limits
+    ik = (struct.pack("<B", 2) +         # IK target bone index
+          struct.pack("<i", 10) +        # loop count
+          struct.pack("<f", 0.5) +       # limit radian
+          struct.pack("<i", 1) +         # link count
+          struct.pack("<B", 0) +         # link bone index
+          struct.pack("<B", 0))          # has limits = 0
+    bone("leg", (0, 2, 0), 0, 0x0008 | 0x0002 | 0x0004 | 0x0020,
+         struct.pack("<3f", 0, 1, 0) + ik)  # tail vec3 + IK payload
+
+    out += struct.pack("<i", 0)          # morphs
+    out += struct.pack("<i", 0)          # display frames
+    out += struct.pack("<i", 0)          # rigid bodies
+    out += struct.pack("<i", 0)          # joints
+    return bytes(out)
+
+
 def main() -> None:
     # PMX samples — these are the synthetic inputs (do NOT commit real assets).
     samples = {
@@ -504,7 +571,7 @@ def main() -> None:
     _morph = {"name": "smile", "type": 1,
               "offsets": [{"vertex_index": 0, "offset": (0.0, 0.1, 0.0)}]}
     golden_pmx20 = {
-        "ir_version": "0.1.0", "format": "pmx", "model_name": "synthetic",
+        "ir_version": "0.2.0", "format": "pmx", "model_name": "synthetic",
         "pmx_version": 2.0, "encoding": "utf-16le",
         "bones": [_bone0, _bone1], "morphs": [_morph], "materials": [_mat],
         "counts_materials": 1, "counts_bones": 2, "counts_morphs": 1,
@@ -514,7 +581,7 @@ def main() -> None:
     golden_pmx21 = dict(golden_pmx20)
     golden_pmx21.update({"pmx_version": 2.1, "encoding": "utf-8"})
     golden_vmd = {
-        "ir_version": "0.1.0", "format": "vmd", "model_name": "synthetic",
+        "ir_version": "0.2.0", "format": "vmd", "model_name": "synthetic",
         "bones": [
             {"name": "center", "frame": 0, "position": (0.0, 0.0, 0.0),
              "rotation": (0.0, 0.0, 0.0, 1.0)},

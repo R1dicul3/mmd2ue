@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 
-IR_VERSION = "0.1.0"
+IR_VERSION = "0.2.0"
 
 
 @dataclass

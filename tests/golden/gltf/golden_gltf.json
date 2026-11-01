@@ -15,9 +15,9 @@
     {
       "name": "child",
       "translation": [
-        0,
-        1,
-        0
+        -0.0,
+        1.0,
+        0.0
       ]
     },
     {
@@ -49,13 +49,13 @@
       "name": "skin",
       "pbrMetallicRoughness": {
         "baseColorFactor": [
-          0.8,
-          0.6,
-          0.4,
-          1
+          0.800000011920929,
+          0.6000000238418579,
+          0.4000000059604645,
+          1.0
         ],
-        "metallicFactor": 0,
-        "roughnessFactor": 1,
+        "metallicFactor": 0.0,
+        "roughnessFactor": 1.0,
         "baseColorTexture": {
           "index": 0
         }
@@ -88,14 +88,14 @@
       "count": 3,
       "type": "VEC3",
       "min": [
-        0,
-        0,
-        0
+        -1.0,
+        0.0,
+        0.0
       ],
       "max": [
-        1,
-        1,
-        0
+        -0.0,
+        1.0,
+        0.0
       ]
     },
     {
@@ -104,14 +104,14 @@
       "count": 3,
       "type": "VEC3",
       "min": [
-        0,
-        0,
-        1
+        -0.0,
+        0.0,
+        1.0
       ],
       "max": [
-        0,
-        0,
-        1
+        -0.0,
+        0.0,
+        1.0
       ]
     },
     {
@@ -120,12 +120,12 @@
       "count": 3,
       "type": "VEC2",
       "min": [
-        0,
-        0
+        0.0,
+        0.0
       ],
       "max": [
-        1,
-        1
+        1.0,
+        1.0
       ]
     },
     {

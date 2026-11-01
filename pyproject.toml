@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmd2ue"
-version = "0.1.0"
+version = "0.2.0"
 description = "MMD (PMX/VMD/VPD) to UE5.8 conversion toolkit - core parser layer (stage 1: M0 + M1)"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -141,6 +141,17 @@ def _translation_inverse(x, y, z) -> list:
     return _translation_matrix(-x, -y, -z)
 
 
+def _pmx_to_gltf_vec3(v) -> tuple:
+    """Mirror X to convert PMX (DirectX left-handed) to glTF (right-handed).
+
+    PMX is DirectX left-handed: the character faces -Z with its left side at
+    +X. glTF is right-handed, so copying coordinates verbatim yields a
+    left-right mirrored model. Mirroring X (x -> -x) flips the chirality;
+    triangle winding is reversed separately at the index layer.
+    """
+    return (-float(v[0]), float(v[1]), float(v[2]))
+
+
 def _bone_world_translations(bones) -> list:
     """Return each bone's absolute (model-space) rest translation (x, y, z).
 
@@ -330,8 +341,10 @@ def export_gltf(ir: ModelIR, buffer_uri: str = "model.bin"):
         ty = float(position[1]) if len(position) > 1 else 0.0
         tz = float(position[2]) if len(position) > 2 else 0.0
         node = {"name": name}
-        if tx or ty or tz:
-            node["translation"] = [tx, ty, tz]
+        # Mirror X: PMX (DirectX left-handed) -> glTF (right-handed).
+        gx, gy, gz = _pmx_to_gltf_vec3((tx, ty, tz))
+        if gx or gy or gz:
+            node["translation"] = [gx, gy, gz]
         nodes.append(node)
 
     # ---- Materials (MMD approximation) ----
@@ -400,9 +413,9 @@ def export_gltf(ir: ModelIR, buffer_uri: str = "model.bin"):
         weights_flat = []
         for v in vertices:
             p = v.position if hasattr(v, "position") else v.get("position", (0.0, 0.0, 0.0))
-            positions.extend((float(p[0]), float(p[1]), float(p[2])))
+            positions.extend(_pmx_to_gltf_vec3(p))
             n = v.normal if hasattr(v, "normal") else v.get("normal", (0.0, 0.0, 1.0))
-            normals.extend((float(n[0]), float(n[1]), float(n[2])))
+            normals.extend(_pmx_to_gltf_vec3(n))
             uv = v.uv if hasattr(v, "uv") else v.get("uv", (0.0, 0.0))
             # glTF V axis is flipped vs MMD UV.
             uvs.extend((float(uv[0]), 1.0 - float(uv[1])))
@@ -451,11 +464,16 @@ def export_gltf(ir: ModelIR, buffer_uri: str = "model.bin"):
 
     idx_accessor = None
     if faces:
+        # Reverse winding: mirroring X flips chirality, so each triangle
+        # (a, b, c) becomes (a, c, b) to keep counter-clockwise front faces.
+        reversed_faces = []
+        for i in range(0, len(faces), 3):
+            reversed_faces.extend((faces[i], faces[i + 2], faces[i + 1]))
         if len(vertices) > 65535:
-            idx_data = _pack_u32([int(x) for x in faces])
+            idx_data = _pack_u32([int(x) for x in reversed_faces])
             idx_comp = UNSIGNED_INT
         else:
-            idx_data = _pack_u16([int(x) for x in faces])
+            idx_data = _pack_u16([int(x) for x in reversed_faces])
             idx_comp = UNSIGNED_SHORT
         idx_accessor = _add_accessor(
             buffer_builder, buffer_views, accessors, idx_data, idx_comp,
@@ -486,7 +504,9 @@ def export_gltf(ir: ModelIR, buffer_uri: str = "model.bin"):
         world_positions = _bone_world_translations(bones)
         inv_bind_values = []
         for (ax, ay, az) in world_positions:
-            inv_bind_values.extend(_translation_inverse(ax, ay, az))
+            # Mirror X first, then invert the absolute bind transform.
+            gx, gy, gz = _pmx_to_gltf_vec3((ax, ay, az))
+            inv_bind_values.extend(_translation_inverse(gx, gy, gz))
         unbind_meta = _add_accessor(
             buffer_builder, buffer_views, accessors,
             _pack_floats(inv_bind_values), FLOAT, "MAT4")
